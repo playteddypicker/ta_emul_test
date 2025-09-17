@@ -1,20 +1,42 @@
 name: Notify Discord
 on:
   push:
-    branches: [ main ]
-  pull_request:
+    branches: [ ** ]
 
 jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
-      - name: 깃헙알리미미쿠쨩
+      - name: Send Issue/PR
+        uses: Ilshidur/action-discord@0.3.2
         env:
-          DISCORD_WEBHOOK: ${{ secrets.MIKU_WEBHOOK }}
-        run: |
-          jq -n --arg content ":rocket: $GITHUB_REPOSITORY @ $GITHUB_REF" \
-                --arg username "playteddypicker" \
-                --arg avatar_url "https://avatars.githubusercontent.com/playteddypicker" \
-                '{content:$content, username:$username, avatar_url:$avatar_url}' \
-          | curl -sS -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK"
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }} 
+          DISCORD_USERNAME: 푸시알리미미쿠쨩 
+          DISCORD_AVATAR: https://i.pinimg.com/736x/5f/d5/26/5fd5268fd7d8e0de89130e838e1a797f.jpg 
+          DISCORD_EMBEDS: |
+            [
+              {
+                "title": "새로운 푸시가 왔어요 🚀",
+                "color": 2752509,
+                "description": "[${{ github.repository }}] 브랜치 `${{ github.ref }}`에 푸시됨",
+                "fields": [
+                  {
+                    "name": "Pusher",
+                    "value": "${{ github.actor }}",
+                    "inline": true
+                  },
+                  {
+                    "name": "commit message",
+                    "value": "${{ github.event.head_commit.message }}",
+                    "inline": false
+                  },
+                  {
+                    "name": "commit link",
+                    "value": "${{ github.event.head_commit.url }}",
+                    "inline": false
+                  }
+                ]
+              }
+            ]
+
 
