@@ -1,0 +1,11 @@
+[package]
+name = "ta_emul_test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+goblin = "0.9"
+log = "0.4"
+env_logger = "0.11"
+unicorn-engine-sys = "2.1.5"
