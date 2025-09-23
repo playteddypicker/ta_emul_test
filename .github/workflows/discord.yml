@@ -10,7 +10,7 @@ jobs:
       - name: Send Issue/PR
         uses: Ilshidur/action-discord@0.3.2
         env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }} 
+          DISCORD_WEBHOOK: ${{ secrets.MIKU_WEBHOOK }} 
           DISCORD_USERNAME: 푸시알리미미쿠쨩 
           DISCORD_AVATAR: https://i.pinimg.com/736x/5f/d5/26/5fd5268fd7d8e0de89130e838e1a797f.jpg 
           DISCORD_EMBEDS: |
