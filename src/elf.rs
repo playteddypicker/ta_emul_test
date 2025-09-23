@@ -150,8 +150,10 @@ pub unsafe fn load_and_collect(uc: &Uc, path: &str, base: u64) -> Result<LoadedE
         let end = page_up(base + vaddr + memsz);
         let size = end - start;
 
-        uc.map(start, size, Prot::ALL)?;
-        uc.write(base + vaddr, seg)?;
+        unsafe {
+            uc.map(start, size, Prot::ALL)?;
+            uc.write(base + vaddr, seg)?;
+        }
 
         let mut prot = Prot::READ;
         if (ph.p_flags & PF_W) != 0 {
@@ -160,13 +162,20 @@ pub unsafe fn load_and_collect(uc: &Uc, path: &str, base: u64) -> Result<LoadedE
         if (ph.p_flags & PF_X) != 0 {
             prot |= Prot::EXEC;
         }
-        uc.protect(start, size, prot)?;
+        unsafe { uc.protect(start, size, prot)? };
     }
 
     let mut dynsyms = HashMap::new();
     for s in elf.dynsyms.iter() {
         if s.st_type() == STT_FUNC && s.st_value != 0 {
             if let Some(name) = elf.dynstrtab.get_at(s.st_name) {
+                dynsyms.insert(name.to_string(), base + s.st_value);
+            }
+        }
+    }
+    for s in elf.syms.iter() {
+        if s.st_type() == STT_FUNC && s.st_value != 0 {
+            if let Some(name) = elf.strtab.get_at(s.st_name) {
                 dynsyms.insert(name.to_string(), base + s.st_value);
             }
         }
@@ -240,7 +249,7 @@ pub unsafe fn load_and_collect(uc: &Uc, path: &str, base: u64) -> Result<LoadedE
 pub unsafe fn dump_got_table(uc: &Uc, elf: &LoadedElf) -> Result<()> {
     eprintln!("--- GOT table ({} entries) ---", elf.got_relocs.len());
     for (addr, name, rtype) in &elf.got_relocs {
-        let val = uc.read_u64(*addr)?;
+        let val = unsafe { uc.read_u64(*addr)? };
         let t = match *rtype {
             R_AARCH64_JUMP_SLOT => "JUMP_SLOT",
             R_AARCH64_GLOB_DAT => "GLOB_DAT",

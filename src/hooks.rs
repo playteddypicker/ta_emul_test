@@ -29,7 +29,9 @@ pub unsafe fn install_unmapped_hook(uc: *mut uc_engine) -> Result<uc_hook> {
         );
 
         let p = page_down(addr);
-        let _ = uc_mem_map(uc, p, 0x1000, (Prot::READ | Prot::WRITE | Prot::EXEC).0);
+        unsafe {
+            let _ = uc_mem_map(uc, p, 0x1000, (Prot::READ | Prot::WRITE | Prot::EXEC).0);
+        }
 
         true
     }

@@ -18,7 +18,7 @@ pub struct StubSpace {
 
 impl StubSpace {
     pub unsafe fn new(uc: &Uc, base: u64, size: u64) -> Result<Self> {
-        uc.map(base, size, Prot::READ | Prot::WRITE | Prot::EXEC)?;
+        unsafe { uc.map(base, size, Prot::READ | Prot::WRITE | Prot::EXEC)? };
         Ok(Self {
             base,
             size,
@@ -31,7 +31,7 @@ impl StubSpace {
         let mut buf = [0u8; 8];
         buf[..4].copy_from_slice(&MOVZ_X0_0.to_le_bytes());
         buf[4..].copy_from_slice(&RET.to_le_bytes());
-        uc.write(addr, &buf)?;
+        unsafe { uc.write(addr, &buf)? };
         self.next_off += 0x10; // 16바이트 간격
         Ok(addr)
     }
@@ -47,10 +47,12 @@ pub unsafe fn patch_got_with_lib_or_stub(
         let target = if let Some(symaddr) = lib_syms.get(name) {
             *symaddr
         } else {
-            stubs.alloc_stub_ret0(uc)?
+            unsafe { stubs.alloc_stub_ret0(uc)? }
         };
-        uc.write(*got_addr, &target.to_le_bytes())
-            .with_context(|| format!("write GOT {:#x} <- {:#x} ({})", got_addr, target, name))?;
+        unsafe {
+            uc.write(*got_addr, &target.to_le_bytes())
+                .with_context(|| format!("write GOT {:#x} <- {:#x} ({})", got_addr, target, name))?;
+        }
     }
     Ok(())
 }
