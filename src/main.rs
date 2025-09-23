@@ -6,7 +6,9 @@ mod uc;
 use anyhow::Result;
 use env_logger::Env;
 use log::LevelFilter;
-use unicorn_engine_sys::Prot;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use unicorn_engine_sys::{Prot, RegisterARM64};
 
 use goblin::elf::reloc::{R_AARCH64_GLOB_DAT, R_AARCH64_JUMP_SLOT};
 
@@ -23,29 +25,53 @@ fn main() -> Result<()> {
         .filter_level(LevelFilter::Info)
         .init();
 
-    // unicorn start
+    // --- Argument Parsing ---
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() != 2 {
+        anyhow::bail!(
+            "Usage: {} <directory_in_blobs>",
+            args.get(0).map_or("ta_emul_test", |s| s.as_str())
+        );
+    }
+    let target_dir_name = &args[1];
+    let base_path = PathBuf::from("blobs").join(target_dir_name);
+
+    if !base_path.is_dir() {
+        anyhow::bail!("Error: Directory not found at {}", base_path.display());
+    }
+
+    let so_pattern = base_path.join("*.so").to_string_lossy().to_string();
+    let elf_pattern = base_path.join("*.elf").to_string_lossy().to_string();
+
+    let lib_path = glob::glob(&so_pattern)?
+        .next()
+        .ok_or_else(|| anyhow::anyhow!(".so file not found in {}", base_path.display()))??;
+
+    let ta_path = glob::glob(&elf_pattern)?
+        .next()
+        .ok_or_else(|| anyhow::anyhow!(".elf file not found in {}", base_path.display()))??;
+
+    eprintln!("[*] Using lib: {}", lib_path.display());
+    eprintln!("[*] Using ta:  {}", ta_path.display());
+    // ---
+
     let uc = unsafe { uc::Uc::new_arm64()? };
 
-    // stack
     unsafe {
         uc.map(STACK_TOP - STACK_SIZE, STACK_SIZE, Prot::ALL)?;
         uc.set_sp(STACK_TOP)?;
     }
 
-    // load ta, lib
-    let lib = unsafe { elf::load_and_collect(&uc, "blobs/libcmnlib.so", LIB_BASE)? };
+    let lib = unsafe { elf::load_and_collect(&uc, &lib_path.to_string_lossy(), LIB_BASE)? };
     eprintln!("[lib] dynsyms = {}", lib.dynsyms.len());
 
-    let ta = unsafe { elf::load_and_collect(&uc, "blobs/widevine.elf", TA_BASE)? };
+    let ta = unsafe { elf::load_and_collect(&uc, &ta_path.to_string_lossy(), TA_BASE)? };
     eprintln!("[ta ] got_relocs = {}", ta.got_relocs.len());
 
-    // dump got table
     unsafe { elf::dump_got_table(&uc, &ta)? };
 
-    // stub
     let mut stubspace = unsafe { stubs::StubSpace::new(&uc, STUB_BASE, STUB_SIZE)? };
 
-    // jump slot; glob_dat patch only
     let plt_like: Vec<(u64, String)> = ta
         .got_relocs
         .iter()
@@ -55,55 +81,52 @@ fn main() -> Result<()> {
 
     unsafe { stubs::patch_got_with_lib_or_stub(&uc, &plt_like, &lib.dynsyms, &mut stubspace)? };
 
-    // dump got after patching
     unsafe { elf::dump_got_table(&uc, &ta)? };
 
-    // got hook
     let _h1 = unsafe { hooks::install_unmapped_hook(uc.raw)? };
     let _h2 = unsafe { hooks::install_invalid_insn_hook(uc.raw)? };
     let _h3 = unsafe { hooks::install_intr_hook(uc.raw)? };
 
-    // execute
-    use unicorn_engine_sys::RegisterARM64;
+    // --- Detailed tracing for a single function ---
+    const TRACE_TARGET: &str = "TPM_QuoteInfo_Store";
+    eprintln!("\n\n--- Detailed trace for function: `{}` ---", TRACE_TARGET);
 
-    // 1. Call i_widevine_oemcrypto_initialize
-    const INIT_FUNCTION: &str = "i_widevine_oemcrypto_initialize";
-    if let Some(addr) = ta.dynsyms.get(INIT_FUNCTION) {
-        eprintln!("\n[*] Calling initialization function: `{}` at {:#x}", INIT_FUNCTION, addr);
-        unsafe { uc.start_icount(*addr, 1000)? };
-        let init_ret_val = unsafe { uc.reg_read(RegisterARM64::X0 as i32)? };
-        eprintln!("[+] Initialization finished. Return value (x0) = {:#x}", init_ret_val);
-    } else {
-        eprintln!("\n[*] Could not find initialization function `{}`", INIT_FUNCTION);
-    }
+    if let Some(&addr) = ta.dynsyms.get(TRACE_TARGET) {
+        // Install tracing hooks
+        let h_mem_trace = unsafe { hooks::install_mem_tracer(uc.raw)? };
+        let h_code_trace = unsafe { hooks::install_code_tracer(uc.raw)? };
 
-    // 2. Call i_widevine_oemcrypto_get_api_version
-    const TARGET_FUNCTION: &str = "i_widevine_oemcrypto_get_api_version";
-    if let Some(addr) = ta.dynsyms.get(TARGET_FUNCTION) {
-        eprintln!("\n[*] Calling target function: `{}` at {:#x}", TARGET_FUNCTION, addr);
-        unsafe { uc.start_icount(*addr, 100)? };
-        let ret_val = unsafe { uc.reg_read(RegisterARM64::X0 as i32)? };
-        eprintln!("[+] Target function finished. Return value (x0) = {:#x} ({})", ret_val, ret_val);
+        eprintln!("[*] Starting trace run for `{}` at {:#x}", TRACE_TARGET, addr);
 
-        // Check if the return value is a plausible pointer and read memory
-        if ret_val >= TA_BASE {
-            eprintln!("[*] Return value looks like a pointer. Reading 16 bytes at {:#x}...", ret_val);
-            match unsafe { uc.read_bytes(ret_val, 16) } {
-                Ok(bytes) => {
-                    // Try to print as a string
-                    let s = String::from_utf8_lossy(&bytes);
-                    eprintln!("[+] Memory content (as string): \"{}\"", s.trim_end_matches('\0'));
-                    // Print as hex as well
-                    eprintln!("[+] Memory content (as hex): {:02x?}", bytes);
-                }
-                Err(e) => {
-                    eprintln!("[!] Failed to read memory: {}", e);
-                }
+        // Reset state
+        unsafe {
+            uc.set_sp(STACK_TOP)?;
+            uc.reg_write(RegisterARM64::X0 as i32, 0)?;
+            uc.reg_write(RegisterARM64::X1 as i32, 0)?;
+        }
+
+        let exec_result = unsafe { uc.start_icount(addr, 500) };
+
+        // Remove tracing hooks
+        unsafe {
+            uc.hook_del(h_mem_trace)?;
+            uc.hook_del(h_code_trace)?;
+        }
+
+        match exec_result {
+            Ok(_) => {
+                let ret_val = unsafe { uc.reg_read(RegisterARM64::X0 as i32)? };
+                eprintln!("\n[+] Execution finished normally.");
+                eprintln!("[+] Return value (x0) = {:#x}", ret_val);
+            }
+            Err(e) => {
+                eprintln!("\n[!] Execution failed: {}", e);
             }
         }
     } else {
-        eprintln!("\n[*] Could not find target function `{}`", TARGET_FUNCTION);
+        eprintln!("[!] Could not find function `{}` to trace.", TRACE_TARGET);
     }
+    // ---
 
     eprintln!("\n[*] done");
 

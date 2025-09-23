@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 use std::ffi::CStr;
 use unicorn_engine_sys::{
+    uc_hook, uc_hook_del,
     Arch, Mode, Prot, RegisterARM64, uc_close, uc_emu_start, uc_engine, uc_error, uc_mem_map,
     uc_mem_protect, uc_mem_read, uc_reg_read, uc_mem_write, uc_open, uc_reg_write, uc_strerror,
 };
@@ -92,6 +93,11 @@ impl Uc {
                 &value as *const _ as *const _,
             ))?
         };
+        Ok(())
+    }
+
+    pub unsafe fn hook_del(&self, hook: uc_hook) -> Result<()> {
+        unsafe { check(uc_hook_del(self.raw, hook))? };
         Ok(())
     }
 }
