@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use unicorn_engine_sys::Prot;
 
-use crate::uc::Uc;
+use crate::emul::uc::Uc;
 
 ///   movz x0, #0        (0xD2800000)
 ///   ret                (0xD65F03C0)

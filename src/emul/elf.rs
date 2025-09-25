@@ -5,7 +5,7 @@ use goblin::elf::{Elf, sym::STT_FUNC};
 use std::collections::HashMap;
 use unicorn_engine_sys::Prot;
 
-use crate::uc::Uc;
+use crate::emul::uc::Uc;
 
 // meta of memory-mapped elf
 pub struct LoadedElf {

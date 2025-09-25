@@ -1,7 +1,4 @@
-mod elf;
-mod hooks;
-mod stubs;
-mod uc;
+mod emul;
 
 use anyhow::Result;
 use env_logger::Env;
@@ -9,6 +6,8 @@ use log::LevelFilter;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use unicorn_engine_sys::Prot;
+
+use crate::emul::hook_factories::{HookingStrategyFactory, HookingStrategyType};
 
 
 const STACK_TOP: u64 = 0x7fff_0000;
@@ -51,15 +50,19 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!(".elf file not found in {}", base_path.display()))??;
     // ---
 
-    let uc = unsafe { uc::Uc::new_arm64()? };
+    let uc = unsafe { emul::uc::Uc::new_arm64()? };
 
     unsafe {
         uc.map(STACK_TOP - STACK_SIZE, STACK_SIZE, Prot::ALL)?;
         uc.set_sp(STACK_TOP)?;
     }
 
-    let lib = unsafe { elf::load_and_collect(&uc, &lib_path.to_string_lossy(), LIB_BASE)? };
-    let ta = unsafe { elf::load_and_collect(&uc, &ta_path.to_string_lossy(), TA_BASE)? };
+    let lib = unsafe { emul::elf::load_and_collect(&uc, &lib_path.to_string_lossy(), LIB_BASE)? };
+    let ta = unsafe { emul::elf::load_and_collect(&uc, &ta_path.to_string_lossy(), TA_BASE)? };
+
+    // Install default hooks using the factory
+    let hooking_strategy = HookingStrategyFactory::create_strategy(HookingStrategyType::Default)?;
+    let _h = hooking_strategy.install_hooks(&uc)?;
 
     loop {
         println!("
